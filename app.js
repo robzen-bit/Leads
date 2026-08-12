@@ -234,6 +234,17 @@ function photogCard(prof, opts) {
 function wsCard(w) {
   const left = w.seats - w.sold;
   const booked = (S.bookings[w.id] || []).includes(S.persona);
+  const mine = w.personaKey === S.persona;
+  let actions;
+  if (mine) {
+    actions = `<a class="btn btn-quiet sm" href="#/workshop/${w.id}">Manage listing & roster</a>`;
+  } else if (booked) {
+    actions = `<button class="btn sm done">Booked ✓</button><a class="btn btn-ghost sm" href="#/workshop/${w.id}">View details</a>`;
+  } else if (w.kind !== "mentoring" && left <= 0) {
+    actions = `<a class="btn btn-quiet sm" href="#/workshop/${w.id}">Sold out — view details</a>`;
+  } else {
+    actions = `<a class="btn btn-primary sm" href="#/workshop/${w.id}">View details & book</a>`;
+  }
   return `
   <article class="card hover ws-card">
     <div class="ws-cover ${w.cover}"><span class="ws-format">${w.format === "virtual" ? "Virtual" : "In-person"}</span></div>
@@ -246,6 +257,7 @@ function wsCard(w) {
         <span class="ws-price">$${w.price}${w.kind === "mentoring" ? "<span style='font-weight:400;font-size:12px;color:var(--text3)'>/session</span>" : ""}</span>
         <span class="seats-left">${booked ? "Booked ✓" : w.kind === "mentoring" ? "1:1" : left > 0 ? left + " of " + w.seats + " seats left" : "Sold out"}</span>
       </div>
+      <div class="lead-actions" style="margin-top:10px">${actions}</div>
     </div>
   </article>`;
 }
