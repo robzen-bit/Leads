@@ -24,6 +24,7 @@ function freshState() {
     availability: JSON.parse(JSON.stringify(DATA_AVAILABILITY)),
     notifs: JSON.parse(JSON.stringify(DATA_NOTIFS)),
     bookings: {},            // workshopId -> [personaKey]
+    invites: [],             // {profileId, leadId} sent this session
     myAvailability: {},      // personaKey -> availability id they created
     notifPrefs: { leads: "instant", edu: "instant" },
     seq: 100,
@@ -162,7 +163,7 @@ function subnav(active) {
     ["profile", "Network Profile", "#/profile"]
   ];
   return `<nav class="subnav">${tabs.map(([k, lbl, href]) =>
-    `<a href="${href}" class="${k === active ? "active" : ""}">${lbl}</a>`).join("")}</nav>`;
+    `<a href="${href}" data-tour="tab-${k}" class="${k === active ? "active" : ""}">${lbl}</a>`).join("")}</nav>`;
 }
 
 function netHeader(active, opts) {
@@ -171,8 +172,8 @@ function netHeader(active, opts) {
     <div class="net-head">
       <div><h1>Network</h1><p class="sub">Member-to-member job leads, availability, and education — commission-free.</p></div>
       <div class="head-actions">
-        <a class="btn btn-quiet" href="#/availability">List availability</a>
-        <a class="btn btn-orange" href="#/post">Post a job lead</a>
+        <a class="btn btn-quiet" data-tour="list-availability" href="#/availability">List availability</a>
+        <a class="btn btn-orange" data-tour="post-lead" href="#/post">Post a job lead</a>
       </div>
     </div>
     ${o.noNav ? "" : subnav(active)}`;
@@ -407,19 +408,19 @@ function vHome() {
   let zone1;
   if (isPosterMode) {
     zone1 = `
-    <section class="section">
+    <section class="section" data-tour="zone-leads">
       <div class="section-head"><h2>Your open leads</h2><a class="link see-all" href="#/my-posts">My posts →</a></div>
       <div class="card-grid cols-2">${myLeads.filter((l) => l.status === "open").map((l) => leadCard(l)).join("") || emptyState("No open leads", "Post a job lead to reach qualified photographers near your event.")}</div>
     </section>`;
   } else if (matched.length) {
     zone1 = `
-    <section class="section">
+    <section class="section" data-tour="zone-leads">
       <div class="section-head"><h2>Leads for you</h2><a class="link see-all" href="#/board">Job board →</a></div>
       <div class="card-grid cols-2">${matched.slice(0, 4).map((l) => leadCard(l)).join("")}</div>
     </section>`;
   } else {
     zone1 = `
-    <section class="section">
+    <section class="section" data-tour="zone-leads">
       <div class="section-head"><h2>Leads for you</h2><a class="link see-all" href="#/board">Job board →</a></div>
       ${emptyState("No matching leads yet. You'll get a notification the moment one is posted.", "Try widening your travel radius or adding shoot types to your network profile.")}
     </section>`;
@@ -434,7 +435,7 @@ function vHome() {
       .sort((x, y) => miles(x.p.town, me().town) - miles(y.p.town, me().town))
       .slice(0, 3);
     zone2 = `
-    <section class="section">
+    <section class="section" data-tour="zone-availability">
       <div class="section-head"><h2>Availability near you</h2><a class="link see-all" href="#/board/avail">Browse all →</a></div>
       <div class="card-grid cols-3">${avail.map((x) => photogCard(x.p, { invite: true, note: x.a.note })).join("")}</div>
     </section>`;
@@ -463,7 +464,7 @@ function vHome() {
   const wsMatched = S.workshops.filter((w) => workshopMatchesProfile(w, prof));
   const wsShow = (wsMatched.length ? wsMatched : S.workshops.filter((w) => w.personaKey !== S.persona)).slice(0, 3);
   const zone3 = `
-    <section class="section">
+    <section class="section" data-tour="zone-learn">
       <div class="section-head"><h2>Learn something new${wsMatched.length ? " — matched to your interests" : ""}</h2><a class="link see-all" href="#/learn">Learn & Teach →</a></div>
       <div class="card-grid cols-3">${wsShow.map(wsCard).join("")}</div>
     </section>`;
@@ -759,7 +760,7 @@ function vLeadDetail(id) {
   return `${netHeader("board", { noNav: true })}
   <a class="back-link" href="#/board">← Back to job board</a>
   <div class="detail-grid">
-    <div class="card pad-lg">
+    <div class="card pad-lg" data-tour="lead-detail">
       <div class="detail-title-row">
         <div>
           <div class="chip-row" style="margin-bottom:9px">${lead.shootTypes.map((t) => `<span class="chip">${esc(typeLabel(t))}</span>`).join("")}
@@ -777,7 +778,7 @@ function vLeadDetail(id) {
       </div>
       <h3 style="margin-bottom:7px">About this job</h3>
       <p style="color:var(--text2);font-size:13.5px">${esc(lead.description)}</p>
-      <div style="margin-top:22px">${action}</div>
+      <div style="margin-top:22px" data-tour="lead-action">${action}</div>
       <div class="disclaimer">Zenfolio introduces members. Rates, contracts, and working arrangements are between you. This is a lead, not employment — Zenfolio is not a staffing agency and does not vet or endorse members.</div>
       <p style="margin-top:12px"><button class="link subtle" onclick="A.report()">Report this post</button></p>
     </div>
@@ -802,7 +803,7 @@ function vBoard(sub) {
   if (sub === "avail") b.tab = "avail";
   else if (sub === "leads") b.tab = "leads";
   const tabs = `
-  <div class="board-tabs">
+  <div class="board-tabs" data-tour="board-tabs">
     <a href="#/board/leads" class="${b.tab === "leads" ? "active" : ""}">Job leads</a>
     <a href="#/board/avail" class="${b.tab === "avail" ? "active" : ""}">Available photographers</a>
   </div>`;
@@ -813,7 +814,7 @@ function vBoard(sub) {
       .filter((x) => x.p)
       .sort((x, y) => miles(x.p.town, me().town) - miles(y.p.town, me().town));
     return `${netHeader("board")}${tabs}
-      <div class="card-grid cols-3">
+      <div class="card-grid cols-3" data-tour="avail-grid">
         ${rows.map((x) => photogCard(x.p, { invite: true, note: x.a.note + " — " + x.a.dates })).join("") || emptyState("No availability listed", "Photographers who broadcast open dates appear here.")}
       </div>`;
   }
@@ -888,7 +889,7 @@ function vMyPosts() {
   return `${netHeader("my-posts")}
   <section class="section">
     <div class="section-head"><h2>Job leads</h2><a class="btn btn-orange sm" href="#/post">Post a job lead</a></div>
-    <div class="card-grid cols-2">${leadRows || emptyState("No leads posted yet", "Post a job lead and we'll notify matching photographers near your event.")}</div>
+    <div class="card-grid cols-2" data-tour="myposts-leads">${leadRows || emptyState("No leads posted yet", "Post a job lead and we'll notify matching photographers near your event.")}</div>
   </section>
   <section class="section">
     <div class="section-head"><h2>Availability listings</h2><a class="btn btn-quiet sm" href="#/availability">List availability</a></div>
@@ -966,7 +967,7 @@ function vManage(id) {
     </div>
   </div>
   <div class="section-head"><h2>Interested photographers</h2></div>
-  <div class="card-grid cols-2">
+  <div class="card-grid cols-2" data-tour="interested-grid">
     ${cards || emptyState("No responses yet", "Matched photographers were notified — interest usually lands within hours.")}
   </div>`;
 }
@@ -1067,7 +1068,7 @@ function vLearn() {
     const seats = hosted.reduce((n, w) => n + w.sold, 0);
     const rev = hosted.reduce((n, w) => n + w.sold * w.price, 0);
     hostZone = `
-    <section class="section">
+    <section class="section" data-tour="your-offerings">
       <div class="section-head"><h2>Your offerings</h2></div>
       <div class="card" style="margin-bottom:14px">
         <div class="host-stats">
@@ -1096,9 +1097,9 @@ function vLearn() {
   <section class="section">
     <div class="section-head">
       <h2>Workshops & mentoring${matchedIds.length ? " — matches first" : ""}</h2>
-      <a class="btn btn-orange sm" href="#/host">Host a workshop</a>
+      <a class="btn btn-orange sm" data-tour="host-btn" href="#/host">Host a workshop</a>
     </div>
-    <div class="card-grid cols-3">${browse.map(wsCard).join("")}</div>
+    <div class="card-grid cols-3" data-tour="learn-grid">${browse.map(wsCard).join("")}</div>
     <p style="color:var(--text3);font-size:12.5px;margin-top:14px">Booking, payment, and seat management ride your existing BookMe rails — multi-seat capacity and virtual meeting links included.</p>
   </section>`;
 }
@@ -1116,7 +1117,7 @@ function vWorkshop(id) {
   if (mine) action = "";
   else if (booked) action = `<button class="btn done lg">Booked ✓ — confirmation sent</button>`;
   else if (left <= 0) action = `<button class="btn lg" disabled>Sold out</button>`;
-  else action = `<button class="btn btn-orange lg" onclick="A.bookStart('${w.id}')">Book your seat — $${w.price}</button>`;
+  else action = `<button class="btn btn-orange lg" data-tour="book-btn" onclick="A.bookStart('${w.id}')">Book your seat — $${w.price}</button>`;
 
   const rosterBlock = mine ? `
     <div class="card" style="margin-top:16px">
@@ -1137,7 +1138,7 @@ function vWorkshop(id) {
   <a class="back-link" href="#/learn">← Back to Learn & Teach</a>
   <div class="detail-grid">
     <div>
-      <div class="card ws-card">
+      <div class="card ws-card" data-tour="ws-detail">
         <div class="ws-cover ${w.cover}" style="height:150px"><span class="ws-format">${w.format === "virtual" ? "Virtual" : "In-person"}</span></div>
         <div class="ws-body" style="padding:24px 26px 26px">
           <div class="chip-row">${w.topics.map((t) => `<span class="chip gray">${esc(topicLabel(t))}</span>`).join("")}<span class="chip orange">${w.kind === "mentoring" ? "1:1 Mentoring" : esc(kindLabel(w))}</span></div>
@@ -1175,7 +1176,7 @@ function vWorkshop(id) {
           <button class="btn btn-quiet sm" onclick="A.portfolio('${w.hostName}')">View Zenfolio portfolio</button>
         </div>
       </div>
-      <div class="card" style="margin-top:14px">
+      <div class="card" style="margin-top:14px" data-tour="bookme-card">
         <div class="bookme-brand" style="border:none;padding:0;margin:0"><span class="bm">BookMe</span> Powered by BookMe</div>
         <p style="font-size:12.5px;color:var(--text2);margin-top:8px">Multi-seat booking, payment, and ${w.format === "virtual" ? "your meeting link" : "reminders"} are handled by the host's BookMe calendar.</p>
       </div>
@@ -1262,7 +1263,7 @@ function vHost() {
     const topicNames = h.topics.map(topicLabel).join(" & ").toLowerCase();
     body = `
       <h2 style="margin-bottom:16px">Topics & preview</h2>
-      <div class="field"><label>Skill topics</label>
+      <div class="field" data-tour="hw-topics"><label>Skill topics</label>
         ${picker("topic", "hw", h.topics)}
         ${h.errs.topics ? `<p class="err">${h.errs.topics}</p>` : ""}
       </div>
@@ -1575,6 +1576,7 @@ function render() {
   renderModal();
   if (location.hash === lastHash) window.scrollTo(0, y); else window.scrollTo(0, 0);
   lastHash = location.hash;
+  if (typeof Tour !== "undefined") Tour.afterRender();
 }
 
 /* ================================================================
@@ -1656,6 +1658,7 @@ const A = {
     if (!leadId) return;
     const p = profileById(profileId);
     const lead = S.leads.find((l) => l.id === leadId);
+    S.invites.push({ profileId, leadId });
     const pk = Object.values(PERSONAS).find((x) => x.profileId === profileId);
     if (pk) notify(pk.key, `${lead.poster.studio} invited you to their lead: “${lead.title}”`, "#/lead/" + lead.id);
     toast(`Invitation sent to ${p.name} for “${lead.title}.”`);
@@ -1913,6 +1916,7 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest(".loc-field")) document.querySelectorAll(".loc-dd").forEach((el) => (el.style.display = "none"));
 });
 document.addEventListener("keydown", (e) => {
+  if (document.body.classList.contains("tour-lock")) return; // tour owns escape while a walkthrough runs
   if (e.key === "Escape" && S) {
     if (S.ui.modal) { S.ui.modal = null; renderModal(); }
     else if (S.ui.bellOpen) { S.ui.bellOpen = false; renderTop(); }
