@@ -32,12 +32,52 @@ const TAXONOMY = [
   { id: "real-estate", label: "Real Estate", group: "Client" }
 ];
 
+/* Suggested shoot types offered by the "+ Add shoot type" picker (beyond the base taxonomy) */
+const SUGGESTED_TYPES = [
+  { id: "headshots",    label: "Headshots" },
+  { id: "maternity",    label: "Maternity" },
+  { id: "boudoir",      label: "Boudoir" },
+  { id: "pets",         label: "Pets" },
+  { id: "events-corp",  label: "Corporate & Private Events" },
+  { id: "graduations",  label: "Graduations" },
+  { id: "food",         label: "Food & Beverage" },
+  { id: "product",      label: "Product" },
+  { id: "fine-art",     label: "Fine Art" },
+  { id: "drone",        label: "Drone / Aerial" },
+  { id: "automotive",   label: "Automotive" },
+  { id: "church",       label: "Church Directories" }
+];
+
 const ROLES = [
   { id: "lead",      label: "Lead shooter" },
   { id: "second",    label: "Second shooter" },
   { id: "assistant", label: "Assistant" },
   { id: "coverage",  label: "Volume day coverage" }
 ];
+
+/* Suggested roles offered by the "+ Add role" picker (beyond the base roles) */
+const SUGGESTED_ROLES = [
+  { id: "videographer",   label: "Videographer" },
+  { id: "photo-booth",    label: "Photo Booth Operator" },
+  { id: "lighting-assist",label: "Lighting Assistant" },
+  { id: "posing-assist",  label: "Posing Assistant" },
+  { id: "digital-tech",   label: "Digital Tech" },
+  { id: "retoucher",      label: "Retoucher / Editor" },
+  { id: "drone-op",       label: "Drone Operator" }
+];
+
+/* ZIP → demo town lookup for the free-entry location field */
+const ZIP_MAP = {
+  "17101": "harrisburg", "17102": "harrisburg", "17103": "harrisburg", "17104": "harrisburg",
+  "17110": "harrisburg", "17111": "harrisburg", "17112": "harrisburg",
+  "17050": "mechanicsburg", "17055": "mechanicsburg",
+  "17601": "lancaster", "17602": "lancaster", "17603": "lancaster",
+  "17401": "york", "17402": "york", "17403": "york", "17404": "york", "17408": "york",
+  "17013": "carlisle", "17015": "carlisle",
+  "17201": "chambersburg", "17202": "chambersburg",
+  "17033": "hershey", "17022": "elizabethtown", "17325": "gettysburg",
+  "17042": "lebanon", "17046": "lebanon"
+};
 
 const TOPICS = [
   { id: "portrait-lighting", label: "Portrait lighting" },
@@ -49,7 +89,19 @@ const TOPICS = [
   { id: "pricing",           label: "Pricing" },
   { id: "business",          label: "Business" },
   { id: "editing",           label: "Editing" },
-  { id: "real-estate-edu",   label: "Real estate" }
+  { id: "real-estate-edu",   label: "Real estate" },
+  { id: "photo-tours",       label: "Photo Tours" }
+];
+
+/* Suggested topics offered by the "+ Add topic" picker (beyond the base topics) */
+const SUGGESTED_TOPICS = [
+  { id: "astro",     label: "Astrophotography" },
+  { id: "film",      label: "Film & Analog" },
+  { id: "printing",  label: "Printing & Albums" },
+  { id: "ips",       label: "In-Person Sales" },
+  { id: "marketing", label: "Marketing & SEO" },
+  { id: "culling",   label: "Culling & Workflow" },
+  { id: "video",     label: "Video / Hybrid" }
 ];
 
 /* The three switchable demo viewpoints */
@@ -381,6 +433,17 @@ const DATA_WORKSHOPS = [
     topics: ["pricing", "business"], level: "All levels", cover: "g5",
     description: "One-on-one working sessions on your pricing, packages, and portfolio curation. We meet monthly and set concrete goals between sessions.",
     roster: []
+  },
+  {
+    id: "w7", kind: "tour", title: "Sunrise Photo Tour — Gettysburg Battlefield",
+    hostName: "Tom Herzog", hostStudio: "Herzog Photography", hostProfileId: "p-tom",
+    hostAv: "av-e", hostInitials: "TH",
+    format: "in-person", town: "gettysburg", venue: "Meet at the visitor center lot, Gettysburg",
+    seats: 12, sold: 5, price: 79,
+    dateLabel: "Sun, Oct 4", time: "6:00 – 10:00 AM", duration: "4 hours",
+    topics: ["photo-tours"], level: "All levels", cover: "g5",
+    description: "A guided golden-hour shoot across the battlefield's most photogenic ridgelines. We move as a small group through four stops — composition and light coaching at each — and wrap with coffee and an informal image review.",
+    roster: ["Caleb Moss", "Nadia Osei", "+3 more"]
   },
   {
     id: "w6", kind: "workshop", title: "Real Estate & Twilight Exteriors",

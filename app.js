@@ -12,6 +12,12 @@ let lastHash = "";
 function freshState() {
   return {
     persona: "devon",
+    /* Live copies of the vocabularies so members can add suggested or custom entries */
+    taxonomy: JSON.parse(JSON.stringify(TAXONOMY)),
+    roles: JSON.parse(JSON.stringify(ROLES)),
+    topics: JSON.parse(JSON.stringify(TOPICS)),
+    towns: JSON.parse(JSON.stringify(TOWNS)),
+    recentLocations: ["Carlisle, PA", "York, PA", "Hershey, PA"],
     profiles: JSON.parse(JSON.stringify(DATA_PROFILES)),
     leads: JSON.parse(JSON.stringify(DATA_LEADS)),
     workshops: JSON.parse(JSON.stringify(DATA_WORKSHOPS)),
@@ -23,6 +29,7 @@ function freshState() {
     seq: 100,
     ui: {
       bellOpen: false,
+      addPanel: null,        // "<kind>:<ctx>" of the open add-suggestions panel
       modal: null,           // {type, ...payload}
       compose: null,         // leadId with the interest note box open
       board: { tab: "leads", type: "all", role: "all", dist: "any", when: "any" },
@@ -39,15 +46,15 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const me = () => PERSONAS[S.persona];
 const myProfile = () => S.profiles.find((p) => p.id === me().profileId);
-const typeLabel = (id) => (TAXONOMY.find((t) => t.id === id) || { label: id }).label;
-const roleLabel = (id) => (ROLES.find((r) => r.id === id) || { label: id }).label;
-const topicLabel = (id) => (TOPICS.find((t) => t.id === id) || { label: id }).label;
-const townName = (key) => (TOWNS[key] ? TOWNS[key].name : key);
+const typeLabel = (id) => (S.taxonomy.find((t) => t.id === id) || { label: id }).label;
+const roleLabel = (id) => (S.roles.find((r) => r.id === id) || { label: id }).label;
+const topicLabel = (id) => (S.topics.find((t) => t.id === id) || { label: id }).label;
+const townName = (key) => (S.towns[key] ? S.towns[key].name : key);
 const profileById = (id) => S.profiles.find((p) => p.id === id);
 const uid = (pfx) => pfx + (++S.seq);
 
 function miles(a, b) {
-  const A = TOWNS[a], B = TOWNS[b];
+  const A = S.towns[a], B = S.towns[b];
   if (!A || !B) return 999;
   const toR = (d) => (d * Math.PI) / 180, R = 3959;
   const dLat = toR(B.lat - A.lat), dLng = toR(B.lng - A.lng);
@@ -62,7 +69,7 @@ function distLabel(townKey) {
 /* ---------- Matching engine (Section 7 rules) ---------- */
 function typeMatches(leadType, profileTypes) {
   if (profileTypes.includes(leadType)) return true;
-  const tax = TAXONOMY.find((t) => t.id === leadType);
+  const tax = S.taxonomy.find((t) => t.id === leadType);
   if (tax && tax.parent && profileTypes.includes(tax.parent)) return true;      // profile lists parent
   if (tax && tax.children) return tax.children.some((c) => profileTypes.includes(c)); // lead lists parent
   return false;
@@ -234,7 +241,7 @@ function wsCard(w) {
       <h3><a href="#/workshop/${w.id}">${esc(w.title)}</a></h3>
       <div class="ws-host"><span class="avatar sm ${w.hostAv}">${w.hostInitials}</span>${esc(w.hostName)}</div>
       <div class="ws-meta">${esc(w.dateLabel)} · ${esc(w.time)}${w.format === "in-person" ? " · " + esc(townName(w.town)) : ""}</div>
-      <div class="chip-row">${w.topics.map((t) => `<span class="chip gray">${esc(topicLabel(t))}</span>`).join("")}</div>
+      <div class="chip-row">${w.kind !== "workshop" ? `<span class="chip orange">${esc(kindLabel(w))}</span>` : ""}${w.topics.map((t) => `<span class="chip gray">${esc(topicLabel(t))}</span>`).join("")}</div>
       <div class="ws-foot">
         <span class="ws-price">$${w.price}${w.kind === "mentoring" ? "<span style='font-weight:400;font-size:12px;color:var(--text3)'>/session</span>" : ""}</span>
         <span class="seats-left">${booked ? "Booked ✓" : w.kind === "mentoring" ? "1:1" : left > 0 ? left + " of " + w.seats + " seats left" : "Sold out"}</span>
@@ -245,6 +252,132 @@ function wsCard(w) {
 
 function emptyState(title, body) {
   return `<div class="empty"><b>${esc(title)}</b>${esc(body)}</div>`;
+}
+
+/* ---------- Shared chip picker (shoot types, roles, skill topics) ----------
+   Renders the vocabulary as selectable chips plus an "+ Add …" control that
+   opens a suggestions dropdown and a create-your-own input. Additions land in
+   the session vocabulary (S.taxonomy / S.roles / S.topics) so they flow
+   through labels, matching, and filters everywhere. */
+const PICKERS = {
+  type:  { list: () => S.taxonomy, sugg: () => SUGGESTED_TYPES,  noun: "shoot type", prefix: "custom" },
+  role:  { list: () => S.roles,    sugg: () => SUGGESTED_ROLES,  noun: "role",       prefix: "role" },
+  topic: { list: () => S.topics,   sugg: () => SUGGESTED_TOPICS, noun: "topic",      prefix: "topic" }
+};
+function pickerArr(kind, ctx) {
+  if (kind === "type") {
+    if (ctx === "fr") return S.ui.fr.types;
+    if (ctx === "pw") return S.ui.pw.shootTypes;
+    if (ctx === "av") return S.ui.av.shootTypes;
+    return myProfile().shootTypes;
+  }
+  if (kind === "role") {
+    if (ctx === "fr") return S.ui.fr.roles;
+    if (ctx === "pw") return S.ui.pw.roles;
+    if (ctx === "av") return S.ui.av.roles;
+    return myProfile().roles;
+  }
+  if (ctx === "fr") return S.ui.fr.learn;
+  if (ctx === "hw") return S.ui.hw.topics;
+  return myProfile().wantsToLearn;
+}
+function picker(kind, ctx, selected) {
+  const cfg = PICKERS[kind];
+  const list = cfg.list().filter((t) => !t.children);
+  const key = kind + ":" + ctx;
+  const open = S.ui.addPanel === key;
+  const sugg = cfg.sugg().filter((s) => !cfg.list().some((t) => t.id === s.id));
+  return `
+  <div class="chip-row" style="gap:8px">
+    ${list.map((t) => `<button class="chip-select ${selected.includes(t.id) ? "on" : ""}" onclick="A.pickToggle('${kind}','${ctx}','${t.id}')"><span class="tick">✓ </span>${t.group === "Volume" ? "Volume · " : ""}${esc(t.label)}</button>`).join("")}
+    <button class="chip-select add" onclick="A.addPanelToggle('${kind}','${ctx}')" aria-expanded="${open}">+ Add ${cfg.noun}</button>
+  </div>
+  ${open ? `
+  <div class="add-panel">
+    <p class="add-panel-head">Suggestions</p>
+    <div class="chip-row" style="gap:6px">
+      ${sugg.length ? sugg.map((s) => `<button class="chip-select" onclick="A.addSuggestedItem('${kind}','${ctx}','${s.id}')">+ ${esc(s.label)}</button>`).join("")
+        : `<span class="hint-inline">All suggestions added — create your own below.</span>`}
+    </div>
+    <div class="add-panel-custom">
+      <input type="text" id="custom-add-input" placeholder="Or create your own ${cfg.noun}…" onkeydown="if(event.key==='Enter'){event.preventDefault();A.addCustomItem('${kind}','${ctx}')}">
+      <button class="btn btn-primary sm" onclick="A.addCustomItem('${kind}','${ctx}')">Add</button>
+    </div>
+  </div>` : ""}`;
+}
+
+/* ---------- Offering kind label (workshop / mentoring / tour / custom) ---------- */
+function kindLabel(w) {
+  if (w.kind === "workshop") return "Workshop";
+  if (w.kind === "mentoring") return "Mentoring";
+  if (w.kind === "tour") return "Photo Tour";
+  return w.kindCustom || "Session";
+}
+
+/* ---------- Free-entry location field with recents + suggestions ---------- */
+function locState(ctx) { return ctx === "pw" ? S.ui.pw : S.ui.hw; }
+function locField(ctx, label, hint, err) {
+  const st = locState(ctx);
+  return `
+  <div class="field"><label>${label}</label>
+    <div class="loc-field">
+      <input type="text" id="loc-input-${ctx}" value="${esc(st.townLabel)}" autocomplete="off" placeholder="City or ZIP"
+        oninput="A.locInput('${ctx}', this.value)" onfocus="A.locFocus('${ctx}')">
+      <div class="loc-dd" id="loc-dd-${ctx}"></div>
+    </div>
+    ${err ? `<p class="err">${err}</p>` : hint ? `<p class="hint">${hint}</p>` : ""}
+  </div>`;
+}
+function paintLocDD(ctx) {
+  const el = document.getElementById("loc-dd-" + ctx);
+  if (!el) return;
+  const st = locState(ctx);
+  const q = (st.townLabel || "").toLowerCase().trim();
+  const recents = S.recentLocations.filter((r) => !q || r.toLowerCase().includes(q)).slice(0, 5);
+  const shown = new Set(recents.map((r) => r.toLowerCase()));
+  const towns = Object.keys(S.towns).filter((k) => {
+    const nm = S.towns[k].name.toLowerCase();
+    return !shown.has(nm) && (!q || nm.includes(q));
+  }).slice(0, 6);
+  let html = "";
+  if (recents.length) html += `<p class="loc-head">Recent</p>` + recents.map((r) =>
+    `<button class="loc-item" onclick="A.locPickRecent('${ctx}', ${S.recentLocations.indexOf(r)})">${esc(r)}</button>`).join("");
+  if (towns.length) html += `<p class="loc-head">Suggestions</p>` + towns.map((k) =>
+    `<button class="loc-item" onclick="A.locPickTown('${ctx}','${k}')">${esc(S.towns[k].name)}</button>`).join("");
+  if (!html) html = `<p class="loc-none">No matches — we'll add “${esc(st.townLabel)}” as a new location.</p>`;
+  el.innerHTML = html;
+  el.style.display = "block";
+}
+function resolveLoc(text) {
+  const t = (text || "").toLowerCase().trim();
+  if (!t) return null;
+  if (typeof ZIP_MAP !== "undefined" && ZIP_MAP[t]) return ZIP_MAP[t];
+  const norm = t.replace(/,?\s*pa\.?$/, "").trim();
+  if (!norm) return null;
+  const keys = Object.keys(S.towns);
+  return keys.find((k) => S.towns[k].name.toLowerCase().replace(", pa", "") === norm)
+      || (norm.length >= 3 ? keys.find((k) => S.towns[k].name.toLowerCase().startsWith(norm)) : null)
+      || null;
+}
+function ensureLoc(st) {
+  if (st.town && S.towns[st.town]) return true;
+  const label = (st.townLabel || "").trim();
+  if (!label) return false;
+  const key = "loc-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  if (!S.towns[key]) {
+    // Demo simplification: unrecognized locations anchor to the member's home base for distance math
+    const base = S.towns[me().town];
+    const pretty = /^\d{5}$/.test(label) ? "ZIP " + label : label.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+    S.towns[key] = { name: pretty, lat: base.lat, lng: base.lng, custom: true };
+  }
+  st.town = key;
+  return true;
+}
+function addRecent(label) {
+  const i = S.recentLocations.findIndex((r) => r.toLowerCase() === label.toLowerCase());
+  if (i >= 0) S.recentLocations.splice(i, 1);
+  S.recentLocations.unshift(label);
+  if (S.recentLocations.length > 6) S.recentLocations.pop();
 }
 
 /* ================================================================
@@ -417,10 +550,7 @@ function vFirstRunWizard() {
       <h2 style="margin-bottom:4px">What do you shoot?</h2>
       <p style="color:var(--text2);font-size:13.5px;margin-bottom:14px">Matching starts with shoot type. Pick everything you'd take paid work in.</p>
       <span class="prefill-note">✨ We pre-filled this from your galleries</span>
-      <div class="chip-row" style="gap:8px">
-        ${TAXONOMY.filter((t) => !t.children).map((t) =>
-          `<button class="chip-select ${f.types.includes(t.id) ? "on" : ""}" onclick="A.frToggle('types','${t.id}')"><span class="tick">✓ </span>${t.group === "Volume" ? "Volume · " : ""}${esc(t.label)}</button>`).join("")}
-      </div>`;
+      ${picker("type", "fr", f.types)}`;
   } else if (f.step === 2) {
     body = `
       <h2 style="margin-bottom:4px">Where, and in what role?</h2>
@@ -434,9 +564,7 @@ function vFirstRunWizard() {
         </select>
       </div>
       <div class="field"><label>Roles you'll take</label>
-        <div class="chip-row" style="gap:8px">
-          ${ROLES.map((r) => `<button class="chip-select ${f.roles.includes(r.id) ? "on" : ""}" onclick="A.frToggle('roles','${r.id}')"><span class="tick">✓ </span>${r.label}</button>`).join("")}
-        </div>
+        ${picker("role", "fr", f.roles)}
       </div>
       <div class="field"><label>Rate guidance <span style="color:var(--text3);font-weight:400">(optional)</span></label>
         <input type="text" placeholder="e.g. $50–75/hr" value="${esc(f.rate)}" oninput="A.frSet('rate', this.value)">
@@ -447,9 +575,7 @@ function vFirstRunWizard() {
       <h2 style="margin-bottom:4px">Teaching & learning</h2>
       <p style="color:var(--text2);font-size:13.5px;margin-bottom:16px">This powers workshop matching — separate from job leads.</p>
       <div class="field"><label>I want to learn</label>
-        <div class="chip-row" style="gap:8px">
-          ${TOPICS.map((t) => `<button class="chip-select ${f.learn.includes(t.id) ? "on" : ""}" onclick="A.frToggle('learn','${t.id}')"><span class="tick">✓ </span>${t.label}</button>`).join("")}
-        </div>
+        ${picker("topic", "fr", f.learn)}
       </div>
       <div class="card" style="box-shadow:none;border:1px solid var(--line)">
         <div class="switch-row">
@@ -515,16 +641,11 @@ function vPostWizard() {
         ${w.errs.title ? `<p class="err">${w.errs.title}</p>` : ""}
       </div>
       <div class="field"><label>Shoot type</label>
-        <div class="chip-row" style="gap:8px">
-          ${TAXONOMY.filter((t) => !t.children).map((t) =>
-            `<button class="chip-select ${w.shootTypes.includes(t.id) ? "on" : ""}" onclick="A.pwToggle('shootTypes','${t.id}')"><span class="tick">✓ </span>${t.group === "Volume" ? "Volume · " : ""}${esc(t.label)}</button>`).join("")}
-        </div>
+        ${picker("type", "pw", w.shootTypes)}
         ${w.errs.shootTypes ? `<p class="err">${w.errs.shootTypes}</p>` : ""}
       </div>
       <div class="field"><label>Role needed</label>
-        <div class="chip-row" style="gap:8px">
-          ${ROLES.map((r) => `<button class="chip-select ${w.roles.includes(r.id) ? "on" : ""}" onclick="A.pwToggle('roles','${r.id}')"><span class="tick">✓ </span>${r.label}</button>`).join("")}
-        </div>
+        ${picker("role", "pw", w.roles)}
         ${w.errs.roles ? `<p class="err">${w.errs.roles}</p>` : ""}
       </div>
       <div class="form-row">
@@ -543,12 +664,7 @@ function vPostWizard() {
   } else if (w.step === 2) {
     body = `
       <h2 style="margin-bottom:16px">Location & pay</h2>
-      <div class="field"><label>Location (city or ZIP)</label>
-        <select onchange="A.pwSet('town', this.value)">
-          ${Object.keys(TOWNS).map((k) => `<option value="${k}" ${w.town === k ? "selected" : ""}>${esc(townName(k))}</option>`).join("")}
-        </select>
-        <p class="hint">Exact address shared after you connect — matched photographers see the town only.</p>
-      </div>
+      ${locField("pw", "Location (city or ZIP)", "Exact address shared after you connect — matched photographers see the town only.", w.errs.town)}
       <div class="field"><label>Search radius</label>
         <select onchange="A.pwSet('radius', parseInt(this.value))">
           ${[25, 50, 100].map((r) => `<option value="${r}" ${w.radius === r ? "selected" : ""}>${r} miles</option>`).join("")}
@@ -703,11 +819,11 @@ function vBoard(sub) {
   <div class="filter-bar">
     <select onchange="A.boardFilter('type', this.value)" aria-label="Shoot type">
       <option value="all">All shoot types</option>
-      ${TAXONOMY.map((t) => `<option value="${t.id}" ${b.type === t.id ? "selected" : ""}>${t.group === "Volume" && !t.children ? "Volume · " : ""}${esc(t.label)}</option>`).join("")}
+      ${S.taxonomy.map((t) => `<option value="${t.id}" ${b.type === t.id ? "selected" : ""}>${t.group === "Volume" && !t.children ? "Volume · " : ""}${esc(t.label)}</option>`).join("")}
     </select>
     <select onchange="A.boardFilter('role', this.value)" aria-label="Role">
       <option value="all">All roles</option>
-      ${ROLES.map((r) => `<option value="${r.id}" ${b.role === r.id ? "selected" : ""}>${r.label}</option>`).join("")}
+      ${S.roles.map((r) => `<option value="${r.id}" ${b.role === r.id ? "selected" : ""}>${esc(r.label)}</option>`).join("")}
     </select>
     <select onchange="A.boardFilter('dist', this.value)" aria-label="Distance">
       <option value="any">Any distance</option>
@@ -751,7 +867,7 @@ function vMyPosts() {
 
   const wsRows = myWs.map((w) => `
     <article class="card hover lead-card">
-      <div class="lead-top"><span class="chip-row"><span class="chip orange">${w.kind === "mentoring" ? "Mentoring" : "Workshop"}</span><span class="chip gray">${w.format === "virtual" ? "Virtual" : "In-person"}</span></span></div>
+      <div class="lead-top"><span class="chip-row"><span class="chip orange">${esc(kindLabel(w))}</span><span class="chip gray">${w.format === "virtual" ? "Virtual" : "In-person"}</span></span></div>
       <h3><a href="#/workshop/${w.id}">${esc(w.title)}</a></h3>
       <div class="lead-meta">${esc(w.dateLabel)}<span class="dot">·</span>$${w.price}<span class="dot">·</span><b>${w.sold} of ${w.seats} seats sold</b></div>
       <div class="lead-actions"><a class="btn btn-quiet sm" href="#/workshop/${w.id}">View listing & roster</a></div>
@@ -861,14 +977,10 @@ function vAvailability() {
         ${a.err ? `<p class="err">${a.err}</p>` : ""}
       </div>
       <div class="field"><label>For what kind of work?</label>
-        <div class="chip-row" style="gap:8px">
-          ${TAXONOMY.filter((t) => !t.children).map((t) => `<button class="chip-select ${a.shootTypes.includes(t.id) ? "on" : ""}" onclick="A.avToggle('shootTypes','${t.id}')"><span class="tick">✓ </span>${t.group === "Volume" ? "Volume · " : ""}${esc(t.label)}</button>`).join("")}
-        </div>
+        ${picker("type", "av", a.shootTypes)}
       </div>
       <div class="field"><label>Roles</label>
-        <div class="chip-row" style="gap:8px">
-          ${ROLES.map((r) => `<button class="chip-select ${a.roles.includes(r.id) ? "on" : ""}" onclick="A.avToggle('roles','${r.id}')"><span class="tick">✓ </span>${r.label}</button>`).join("")}
-        </div>
+        ${picker("role", "av", a.roles)}
       </div>
       <div class="field"><label>Travel radius</label>
         <select onchange="A.avSet('radius', parseInt(this.value))">
@@ -955,7 +1067,7 @@ function vLearn() {
       <div class="card-grid cols-2">
         ${hosted.map((w) => `
         <article class="card lead-card">
-          <div class="lead-top"><span class="chip-row"><span class="chip orange">${w.kind === "mentoring" ? "Mentoring" : "Workshop"}</span><span class="chip gray">${w.format === "virtual" ? "Virtual" : "In-person"}</span></span></div>
+          <div class="lead-top"><span class="chip-row"><span class="chip orange">${esc(kindLabel(w))}</span><span class="chip gray">${w.format === "virtual" ? "Virtual" : "In-person"}</span></span></div>
           <h3><a href="#/workshop/${w.id}">${esc(w.title)}</a></h3>
           <div class="lead-meta">${esc(w.dateLabel)}<span class="dot">·</span>$${w.price}<span class="dot">·</span><b>${w.sold} of ${w.seats} sold</b> · $${(w.sold * w.price).toLocaleString()}</div>
           <div class="seat-bar" style="margin-top:4px"><i style="width:${Math.round((w.sold / w.seats) * 100)}%"></i></div>
@@ -1016,7 +1128,7 @@ function vWorkshop(id) {
       <div class="card ws-card">
         <div class="ws-cover ${w.cover}" style="height:150px"><span class="ws-format">${w.format === "virtual" ? "Virtual" : "In-person"}</span></div>
         <div class="ws-body" style="padding:24px 26px 26px">
-          <div class="chip-row">${w.topics.map((t) => `<span class="chip gray">${esc(topicLabel(t))}</span>`).join("")}<span class="chip orange">${w.kind === "mentoring" ? "1:1 Mentoring" : "Workshop"}</span></div>
+          <div class="chip-row">${w.topics.map((t) => `<span class="chip gray">${esc(topicLabel(t))}</span>`).join("")}<span class="chip orange">${w.kind === "mentoring" ? "1:1 Mentoring" : esc(kindLabel(w))}</span></div>
           <h1 style="font-size:22px;margin:6px 0 2px">${esc(w.title)}</h1>
           <div class="info-rows">
             <div class="info-row"><span class="k">When</span><span class="v">${esc(w.dateLabel)} · ${esc(w.time)}${w.recurring ? " · " + esc(w.recurring) : ""}</span></div>
@@ -1064,9 +1176,10 @@ function vHost() {
   if (!S.ui.hw) A.hwInit();
   const h = S.ui.hw;
   if (h.published) {
+    const kn = h.kind === "workshop" ? "workshop" : h.kind === "mentoring" ? "mentoring offer" : h.kind === "tour" ? "photo tour" : (h.kindCustom || "offering").toLowerCase();
     return `<div class="wizard"><div class="card pad-lg success-panel">
       <div class="success-check">✓</div>
-      <h2>Your ${h.kind === "mentoring" ? "mentoring offer" : "workshop"} is live.</h2>
+      <h2>Your ${esc(kn)} is live.</h2>
       <p>We notified <b>${h.notifiedCount} photographer${h.notifiedCount === 1 ? "" : "s"}</b> whose learning interests match. Bookings ride your BookMe calendar.</p>
       <div style="display:flex;gap:10px;justify-content:center">
         <a class="btn btn-primary" href="#/workshop/${h.published}">View listing</a>
@@ -1089,7 +1202,14 @@ function vHost() {
         <div class="radio-cards">
           <button class="radio-card ${h.kind === "workshop" ? "on" : ""}" onclick="A.hwSet('kind','workshop')"><b>Workshop</b><span>Group session with multiple seats</span></button>
           <button class="radio-card ${h.kind === "mentoring" ? "on" : ""}" onclick="A.hwSet('kind','mentoring')"><b>Mentoring</b><span>1:1, with an optional recurring cadence</span></button>
+          <button class="radio-card ${h.kind === "tour" ? "on" : ""}" onclick="A.hwSet('kind','tour')"><b>Photo Tour</b><span>Guided shooting on location — seats and a meeting point</span></button>
+          <button class="radio-card ${h.kind === "custom" ? "on" : ""}" onclick="A.hwSet('kind','custom')"><b>Something else</b><span>Name your own format — critique night, retreat, photo walk…</span></button>
         </div>
+        ${h.kind === "custom" ? `
+        <div style="margin-top:12px">
+          <input type="text" value="${esc(h.kindCustom)}" oninput="A.hwSetQuiet('kindCustom', this.value)" placeholder="e.g. Print Critique Night">
+        </div>` : ""}
+        ${h.errs.kind ? `<p class="err">${h.errs.kind}</p>` : ""}
       </div>
       <div class="field"><label>Title</label>
         <input type="text" value="${esc(h.title)}" oninput="A.hwSetQuiet('title', this.value)" placeholder="e.g. Portrait Lighting Intensive">
@@ -1107,12 +1227,7 @@ function vHost() {
           <button class="radio-card ${h.format === "virtual" ? "on" : ""}" onclick="A.hwSet('format','virtual')"><b>Virtual</b><span>Zoom, Meet, or Teams — link sent on booking</span></button>
         </div>
       </div>
-      ${h.format === "in-person" ? `
-      <div class="field"><label>Location</label>
-        <select onchange="A.hwSet('town', this.value)">
-          ${Object.keys(TOWNS).map((k) => `<option value="${k}" ${h.town === k ? "selected" : ""}>${esc(townName(k))}</option>`).join("")}
-        </select>
-      </div>` : `
+      ${h.format === "in-person" ? locField("hw", "Location (city or ZIP)", h.kind === "tour" ? "Where the tour meets — exact meeting point goes out with the booking confirmation." : "", h.errs.town) : `
       <div class="field"><label>Meeting link</label>
         <input type="url" value="${esc(h.link)}" oninput="A.hwSetQuiet('link', this.value)" placeholder="https://zoom.us/j/…">
         <p class="hint">Included automatically in booking confirmations and reminders — a BookMe virtual-event enhancement.</p>
@@ -1136,9 +1251,7 @@ function vHost() {
     body = `
       <h2 style="margin-bottom:16px">Topics & preview</h2>
       <div class="field"><label>Skill topics</label>
-        <div class="chip-row" style="gap:8px">
-          ${TOPICS.map((t) => `<button class="chip-select ${h.topics.includes(t.id) ? "on" : ""}" onclick="A.hwToggleTopic('${t.id}')"><span class="tick">✓ </span>${t.label}</button>`).join("")}
-        </div>
+        ${picker("topic", "hw", h.topics)}
         ${h.errs.topics ? `<p class="err">${h.errs.topics}</p>` : ""}
       </div>
       <div class="field"><label>Experience level</label>
@@ -1182,17 +1295,13 @@ function vProfile() {
       </div>
       <div class="card pad-lg" style="margin-bottom:16px">
         <h2 style="margin-bottom:16px">What you shoot</h2>
-        <div class="chip-row" style="gap:8px">
-          ${TAXONOMY.filter((t) => !t.children).map((t) => `<button class="chip-select ${p.shootTypes.includes(t.id) ? "on" : ""}" onclick="A.profToggle('shootTypes','${t.id}')"><span class="tick">✓ </span>${t.group === "Volume" ? "Volume · " : ""}${esc(t.label)}</button>`).join("")}
-        </div>
-        <p class="hint" style="margin-top:10px">Pre-filled from your gallery segmentation — adjust anytime.</p>
+        ${picker("type", "prof", p.shootTypes)}
+        <p class="hint" style="margin-top:10px">Pre-filled from your gallery segmentation — adjust anytime, or add your own.</p>
       </div>
       <div class="card pad-lg" style="margin-bottom:16px">
         <h2 style="margin-bottom:16px">Roles & reach</h2>
         <div class="field"><label>Roles offered</label>
-          <div class="chip-row" style="gap:8px">
-            ${ROLES.map((r) => `<button class="chip-select ${p.roles.includes(r.id) ? "on" : ""}" onclick="A.profToggle('roles','${r.id}')"><span class="tick">✓ </span>${r.label}</button>`).join("")}
-          </div>
+          ${picker("role", "prof", p.roles)}
         </div>
         <div class="form-row">
           <div class="field"><label>Home base</label>
@@ -1219,9 +1328,7 @@ function vProfile() {
       <div class="card pad-lg" style="margin-bottom:16px">
         <h2 style="margin-bottom:16px">Teaching & learning</h2>
         <div class="field"><label>I want to learn</label>
-          <div class="chip-row" style="gap:8px">
-            ${TOPICS.map((t) => `<button class="chip-select ${p.wantsToLearn.includes(t.id) ? "on" : ""}" onclick="A.profToggle('wantsToLearn','${t.id}')"><span class="tick">✓ </span>${t.label}</button>`).join("")}
-          </div>
+          ${picker("topic", "prof", p.wantsToLearn)}
         </div>
         <div class="switch-row" style="margin-top:6px">
           <div class="lbl"><b>Willing to teach</b><span>Unlocks workshop hosting and shows you who nearby wants to learn.</span></div>
@@ -1302,7 +1409,7 @@ function renderTop() {
       ${notifs.length ? notifs.slice(0, 8).map((n, i) => `
         <button class="bell-item ${n.unread ? "" : "read"}" onclick="A.notifClick(${i})">
           <span class="b-dot"></span>
-          <span><p>${n.text}</p><span class="ago">${esc(n.ago)}</span></span>
+          <span><p>${esc(n.text)}</p><span class="ago">${esc(n.ago)}</span></span>
         </button>`).join("") : `<div style="padding:22px;text-align:center;color:var(--text3);font-size:12.5px">You're all caught up.</div>`}
     </div>` : ""}`;
   $("#bell-wrap").innerHTML = bell;
@@ -1422,7 +1529,8 @@ function renderModal() {
 function render() {
   const route = parseHash();
   const y = window.scrollY;
-  // clear finished wizard state when leaving its route, so re-entry starts fresh
+  // close transient panels on navigation; clear finished wizard state so re-entry starts fresh
+  if (location.hash !== lastHash) S.ui.addPanel = null;
   if (route.page !== "post" && S.ui.pw && S.ui.pw.published) S.ui.pw = null;
   if (route.page !== "host" && S.ui.hw && S.ui.hw.published) S.ui.hw = null;
   if (route.page !== "first-run" && S.ui.fr && S.ui.fr.done) S.ui.fr = null;
@@ -1465,7 +1573,7 @@ const A = {
   stub(e, name) { e.preventDefault(); toast(name + " isn't part of this prototype — try the Network tab."); },
   switchPersona(k) {
     S.persona = k;
-    S.ui.bellOpen = false; S.ui.compose = null; S.ui.modal = null;
+    S.ui.bellOpen = false; S.ui.compose = null; S.ui.modal = null; S.ui.addPanel = null;
     S.ui.pw = null; S.ui.hw = null; S.ui.av = null; S.ui.fr = null;
     toast("Now viewing as " + PERSONAS[k].name + " — " + PERSONAS[k].role);
     if (parseHash().page === "first-run") go("#/home"); else render();
@@ -1542,17 +1650,65 @@ const A = {
     render();
   },
 
+  /* shared picker: toggle chips, open suggestions panel, add suggested or custom entries */
+  pickToggle(kind, ctx, id) {
+    const arr = pickerArr(kind, ctx);
+    const ix = arr.indexOf(id);
+    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
+    render();
+  },
+  addPanelToggle(kind, ctx) {
+    const key = kind + ":" + ctx;
+    S.ui.addPanel = S.ui.addPanel === key ? null : key;
+    render();
+    if (S.ui.addPanel) { const el = document.getElementById("custom-add-input"); if (el) el.focus(); }
+  },
+  addSuggestedItem(kind, ctx, id) {
+    const cfg = PICKERS[kind];
+    const s = cfg.sugg().find((x) => x.id === id);
+    if (!s) return;
+    if (!cfg.list().some((t) => t.id === s.id)) cfg.list().push({ id: s.id, label: s.label, group: "More" });
+    const arr = pickerArr(kind, ctx);
+    if (!arr.includes(s.id)) arr.push(s.id);
+    toast(`“${s.label}” added.`);
+    render();
+  },
+  addCustomItem(kind, ctx) {
+    const el = document.getElementById("custom-add-input");
+    const label = el ? el.value.trim() : "";
+    if (!label) return;
+    const cfg = PICKERS[kind];
+    const existing = cfg.list().find((t) => t.label.toLowerCase() === label.toLowerCase());
+    let id;
+    if (existing) { id = existing.id; }
+    else {
+      id = cfg.prefix + "-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      if (!id.replace(cfg.prefix + "-", "")) return;
+      cfg.list().push({ id, label, group: "Custom" });
+    }
+    const arr = pickerArr(kind, ctx);
+    if (!arr.includes(id)) arr.push(id);
+    toast(`“${label}” added.`);
+    render();
+  },
+
+  /* free-entry location field */
+  locInput(ctx, val) { const st = locState(ctx); st.townLabel = val; st.town = resolveLoc(val); paintLocDD(ctx); },
+  locFocus(ctx) { paintLocDD(ctx); },
+  locPickTown(ctx, key) { const st = locState(ctx); st.town = key; st.townLabel = townName(key); render(); },
+  locPickRecent(ctx, i) {
+    const r = S.recentLocations[i];
+    if (r == null) return;
+    const st = locState(ctx);
+    st.townLabel = r; st.town = resolveLoc(r);
+    render();
+  },
+
   /* first-run wizard */
   frStart() {
     const p = myProfile();
-    S.ui.fr = { step: 1, types: p.shootTypes.filter((t) => !TAXONOMY.find((x) => x.id === t).children), roles: p.roles.length ? p.roles.slice() : ["second"], radius: p.radius || 50, rate: "", learn: p.wantsToLearn.slice(), teach: p.willingToTeach, done: false };
+    S.ui.fr = { step: 1, types: p.shootTypes.filter((t) => !((S.taxonomy.find((x) => x.id === t) || {}).children)), roles: p.roles.length ? p.roles.slice() : ["second"], radius: p.radius || 50, rate: "", learn: p.wantsToLearn.slice(), teach: p.willingToTeach, done: false };
     if (!S.ui.fr.types.length) S.ui.fr.types = ["portraits"];
-    render();
-  },
-  frToggle(field, id) {
-    const arr = S.ui.fr[field];
-    const ix = arr.indexOf(id);
-    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
     render();
   },
   frSet(field, val) { S.ui.fr[field] = val; },
@@ -1575,7 +1731,7 @@ const A = {
       title: "Senior portrait day — second shooter",
       shootTypes: ["seniors"], roles: ["second"], headcount: 1,
       dateLabel: "Sat, Oct 10", time: "10:00 AM – 4:00 PM",
-      town: me().town, radius: 50, pay: "$50/hr",
+      town: me().town, townLabel: townName(me().town), radius: 50, pay: "$50/hr",
       description: "High-volume senior portrait day at our studio park location. You'll run the casual-poses station while our lead runs formals. Posing guide provided; we edit and deliver.",
       gear: "Full-frame body, 85mm or 70-200",
       published: null, notifiedCount: 0
@@ -1583,12 +1739,6 @@ const A = {
   },
   pwStart() { A.pwInit(); render(); },
   pwSet(field, val) { S.ui.pw[field] = val; },
-  pwToggle(field, id) {
-    const arr = S.ui.pw[field];
-    const ix = arr.indexOf(id);
-    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
-    render();
-  },
   pwBack() {
     if (S.ui.pw.step === 1) { S.ui.pw = null; go("#/home"); return; }
     S.ui.pw.step--; render();
@@ -1604,7 +1754,9 @@ const A = {
       w.step = 2; render(); return;
     }
     if (w.step === 2) {
-      if (!w.pay.trim()) { w.errs.pay = "Pay is required to post — leads without it breed distrust and get skipped."; render(); return; }
+      if (!ensureLoc(w)) w.errs.town = "Where's the job? Enter a city or ZIP.";
+      if (!w.pay.trim()) w.errs.pay = "Pay is required to post — leads without it breed distrust and get skipped.";
+      if (Object.keys(w.errs).length) { render(); return; }
       w.step = 3; render(); return;
     }
     // publish
@@ -1625,6 +1777,7 @@ const A = {
       const pk = Object.values(PERSONAS).find((x) => x.profileId === p.id);
       if (pk) notify(pk.key, `New lead matches your profile: “${w.title.trim()}” · ${townName(w.town)}`, "#/lead/" + id);
     });
+    addRecent(townName(w.town));
     w.published = id;
     w.notifiedCount = matches.length;
     render();
@@ -1632,12 +1785,6 @@ const A = {
 
   /* availability */
   avSet(field, val) { S.ui.av[field] = val; },
-  avToggle(field, id) {
-    const arr = S.ui.av[field];
-    const ix = arr.indexOf(id);
-    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
-    render();
-  },
   avPublish() {
     const a = S.ui.av;
     if (!a.dates.trim()) { a.err = "Tell posters when you're available."; render(); return; }
@@ -1672,9 +1819,9 @@ const A = {
   /* host wizard */
   hwInit() {
     S.ui.hw = {
-      step: 1, errs: {}, kind: "workshop",
+      step: 1, errs: {}, kind: "workshop", kindCustom: "",
       title: "", description: "",
-      format: "in-person", town: me().town, link: "",
+      format: "in-person", town: me().town, townLabel: townName(me().town), link: "",
       dateLabel: "", time: "", seats: 8, price: 99,
       topics: [], level: "All levels",
       published: null, notifiedCount: 0
@@ -1682,12 +1829,6 @@ const A = {
   },
   hwSet(field, val) { S.ui.hw[field] = val; render(); },
   hwSetQuiet(field, val) { S.ui.hw[field] = val; },
-  hwToggleTopic(id) {
-    const arr = S.ui.hw.topics;
-    const ix = arr.indexOf(id);
-    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
-    render();
-  },
   hwBack() {
     if (S.ui.hw.step === 1) { S.ui.hw = null; go("#/learn"); return; }
     S.ui.hw.step--; render();
@@ -1696,16 +1837,21 @@ const A = {
     const h = S.ui.hw;
     h.errs = {};
     if (h.step === 1) {
-      if (!h.title.trim()) { h.errs.title = "Give it a title."; render(); return; }
+      if (h.kind === "custom" && !h.kindCustom.trim()) h.errs.kind = "Name your offering type.";
+      if (!h.title.trim()) h.errs.title = "Give it a title.";
+      if (Object.keys(h.errs).length) { render(); return; }
       h.step = 2; render(); return;
     }
-    if (h.step === 2) { h.step = 3; render(); return; }
+    if (h.step === 2) {
+      if (h.format === "in-person" && !ensureLoc(h)) { h.errs.town = "Where does it meet? Enter a city or ZIP."; render(); return; }
+      h.step = 3; render(); return;
+    }
     if (!h.topics.length) { h.errs.topics = "Pick at least one topic — it powers the matching."; render(); return; }
     const count = eduMatchCount(h.topics, h.format, h.town);
     const id = uid("wx");
     const covers = ["g1", "g2", "g3", "g4", "g5", "g6"];
     S.workshops.push({
-      id, kind: h.kind, title: h.title.trim(),
+      id, kind: h.kind, kindCustom: h.kindCustom.trim(), title: h.title.trim(),
       hostName: me().name, hostStudio: me().studio, hostProfileId: me().profileId, personaKey: S.persona,
       hostAv: me().av, hostInitials: me().initials,
       format: h.format, town: h.town, venue: h.format === "in-person" ? townName(h.town) : undefined,
@@ -1722,6 +1868,7 @@ const A = {
       const pk = Object.values(PERSONAS).find((x) => x.profileId === p.id);
       if (pk) notify(pk.key, `New workshop matches your interests: ${h.title.trim()}${h.format === "virtual" ? " (virtual)" : ""}`, "#/workshop/" + id);
     });
+    if (h.format === "in-person") addRecent(townName(h.town));
     h.published = id;
     h.notifiedCount = count;
     render();
@@ -1738,12 +1885,6 @@ const A = {
     render();
   },
   profToggleTeach() { const p = myProfile(); p.willingToTeach = !p.willingToTeach; toast("Profile saved."); render(); },
-  profToggle(field, id) {
-    const arr = myProfile()[field];
-    const ix = arr.indexOf(id);
-    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
-    render();
-  },
   profSet(field, val) { myProfile()[field] = val; toast("Profile saved."); render(); },
   profSetQuiet(field, val) { myProfile()[field] = val; },
   setPref(group, val) { S.notifPrefs[group] = val; toast("Notification preference saved."); render(); },
@@ -1756,6 +1897,8 @@ const A = {
 document.addEventListener("click", (e) => {
   // close bell dropdown on outside click
   if (S && S.ui.bellOpen && !e.target.closest(".bell-wrap")) { S.ui.bellOpen = false; renderTop(); }
+  // close location dropdowns on outside click
+  if (!e.target.closest(".loc-field")) document.querySelectorAll(".loc-dd").forEach((el) => (el.style.display = "none"));
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && S) {

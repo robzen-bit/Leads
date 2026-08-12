@@ -137,6 +137,30 @@ main#outlet{padding:28px;max-width:1240px;width:100%;margin:0 auto;outline:none}
 .chip-select .tick{display:none;font-weight:700}
 .chip-select.on .tick{display:inline}
 
+/* Add-suggestions panel (shoot types, roles, topics) */
+.chip-select.add{border-style:dashed;color:var(--text3);font-weight:500}
+.chip-select.add:hover{color:var(--text);border-color:#cfcfd6}
+.add-panel{
+  margin-top:10px;border:1px solid var(--line);border-radius:var(--r14);
+  padding:14px 16px;background:var(--surface);box-shadow:var(--shadow-lift);
+}
+.add-panel-head{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
+.add-panel-custom{display:flex;gap:8px;margin-top:12px}
+.add-panel-custom input{flex:1}
+.hint-inline{color:var(--text3);font-size:12.5px}
+
+/* Free-entry location field with recents dropdown */
+.loc-field{position:relative}
+.loc-dd{
+  display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r14);
+  box-shadow:var(--shadow-lift);z-index:70;overflow:hidden;padding:6px;max-height:280px;overflow-y:auto;
+}
+.loc-head{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);padding:7px 10px 3px}
+.loc-item{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:8px;font-size:13.5px}
+.loc-item:hover{background:var(--bg)}
+.loc-none{padding:10px;color:var(--text3);font-size:12.5px}
+
 /* ===== Cards ===== */
 .card{
   background:var(--surface);border-radius:var(--r14);
